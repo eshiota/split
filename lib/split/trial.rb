@@ -82,6 +82,63 @@ module Split
       alternative
     end
 
+    # Choose an alternative, add a participant, and save the alternative choice on the user. This
+    # method is guaranteed to only run once, and will skip the alternative choosing process if run
+    # a second time.
+    def choose_without_tracking!(context = nil)
+      # Only run the process once
+      return alternative if @alternative_choosen
+
+      if @options[:override]
+        self.alternative = @options[:override]
+      elsif @options[:disabled] || !Split.configuration.enabled
+        self.alternative = @experiment.control
+      elsif @experiment.has_winner?
+        self.alternative = @experiment.winner
+      else
+        cleanup_old_versions
+
+        if exclude_user?
+          self.alternative = @experiment.control
+        elsif @user[@experiment.key]
+          self.alternative = @user[@experiment.key]
+        else
+          self.alternative = @experiment.next_alternative
+
+          # Run the post-choosing hook on the context
+          context.send(Split.configuration.on_trial_choose, self) \
+              if Split.configuration.on_trial_choose && context
+        end
+      end
+
+      @user[@experiment.key] = alternative.name if should_store_alternative?
+      @alternative_choosen = true
+      alternative
+    end
+
+    def track!(context = nil)
+      # If there's a winner, just return the winner alternative
+      if alternative
+        return alternative
+      end
+
+      # Experiment has not started, return the control alternative
+      if !@user[@experiment.key]
+        return @experiment.control
+      end
+
+      user_alternative = @experiment.alternatives.find{|a| a.name == @user[@experiment.key] }
+
+      # Experiment is running and user has a variant
+      # If user has not been tracked, track him
+      if !@user[@experiment.tracked_key]
+        user_alternative.increment_participation
+        @user[@experiment.tracked_key] = true
+      end
+
+      user_alternative
+    end
+
     private
 
     def should_store_alternative?
@@ -109,7 +166,7 @@ module Split
     end
 
     def keys_without_experiment(keys)
-      keys.reject { |k| k.match(Regexp.new("^#{@experiment.key}(:finished)?$")) }
+      keys.reject { |k| k.match(Regexp.new("^#{@experiment.key}(:(finished|tracked))?$")) }
     end
   end
 end

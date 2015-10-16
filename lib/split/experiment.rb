@@ -231,6 +231,10 @@ module Split
       "#{key}:finished"
     end
 
+    def tracked_key
+      "#{key}:tracked"
+    end
+
     def metadata_key
       "#{name}:metadata"
     end

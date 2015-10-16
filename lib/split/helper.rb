@@ -2,6 +2,37 @@ module Split
   module Helper
     module_function
 
+    def parse_experiments_file
+      Split.configuration.experiments.keys.map { |name| Split::ExperimentCatalog::find_or_create name }
+    end
+
+    def assign_variants_to_user
+      @user_experiments = {}
+      @experiments_list ||= parse_experiments_file
+      @experiments_list.each do |experiment|
+          trial = Split::Trial.new(user: ab_user, experiment: experiment, override: override_alternative(experiment.name), exclude: exclude_visitor?, disabled: split_generically_disabled?)
+          alt = trial.choose_without_tracking!
+
+          @user_experiments[experiment.name] = alt ? alt.name : nil
+      end
+      @user_experiments
+    end
+
+    def track_experiment(metric_descriptor, control = nil, *alternatives)
+      experiment = ExperimentCatalog.find_or_create(metric_descriptor, control, *alternatives)
+      trial = Split::Trial.new(user: ab_user, experiment: experiment, override: override_alternative(experiment.name), exclude: exclude_visitor?, disabled: split_generically_disabled?)
+      alt = trial.track!(self)
+
+      alternative = alt ? alt.name : control_variable(experiment.control)
+
+      if block_given?
+        metadata = trial ? trial.metadata : {}
+        yield(alternative, metadata)
+      else
+        alternative
+      end
+    end
+
     def ab_test(metric_descriptor, control = nil, *alternatives)
       begin
         experiment = ExperimentCatalog.find_or_initialize(metric_descriptor, control, *alternatives)
